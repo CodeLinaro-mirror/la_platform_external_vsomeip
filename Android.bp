@@ -26,10 +26,6 @@ libvsomeip_sd_srcs = [
 cc_defaults {
     name: "vsomeip_defaults",
 
-    header_libs: [
-        "libboost_headers",
-    ],
-
     local_include_dirs: [
         "interface",
         "implementation/helper/1.70",
@@ -57,7 +53,7 @@ cc_defaults {
 
 cc_library_shared {
     name: "libvsomeip3",
-    vendor: true,
+    vendor_available: true,
 
     srcs: libvsomeip_srcs,
 
@@ -80,21 +76,18 @@ cc_library_shared {
 	"interface"
     ],
 
-    static_libs: [
-        "libboost_system",
-        "libboost_thread",
-        "libboost_filesystem",
-    ],
-
     shared_libs: [
         "liblog",
-        "libutils"
+        "libutils",
+        "libboost_system",
+        "libboost_thread",
+        "libboost_filesystem"
     ]
 }
 
 cc_library_shared {
     name: "libvsomeip3-cfg",
-    vendor: true,
+    vendor_available: true,
 
     srcs: libvsomeip_cfg_srcs,
 
@@ -118,7 +111,7 @@ cc_library_shared {
 
 cc_library_shared {
     name: "libvsomeip3-e2e",
-    vendor: true,
+    vendor_available: true,
 
     srcs: libvsomeip_e2e_srcs,
 
@@ -141,7 +134,7 @@ cc_library_shared {
 
 cc_library_shared {
     name: "libvsomeip3-sd",
-    vendor: true,
+    vendor_available: true,
 
     srcs: libvsomeip_sd_srcs,
 
@@ -165,7 +158,7 @@ cc_library_shared {
 
 cc_defaults {
     name: "vsomeip_example_defaults",
-    vendor: true,
+    vendor_available: true,
     owner: "ts",
 
     shared_libs: [
@@ -178,7 +171,11 @@ cc_binary {
     defaults: ["vsomeip_example_defaults"],
 
     srcs: [
-        "examples/hello_world/hello_world_client.cpp",
+        "examples/hello_world/hello_world_client_main.cpp",
+    ],
+
+    shared_libs: [
+        "liblog",
     ],
 }
 
@@ -187,7 +184,11 @@ cc_binary {
     defaults: ["vsomeip_example_defaults"],
 
     srcs: [
-        "examples/hello_world/hello_world_service.cpp",
+        "examples/hello_world/hello_world_service_main.cpp",
+    ],
+
+    shared_libs: [
+        "liblog",
     ],
 }
 
