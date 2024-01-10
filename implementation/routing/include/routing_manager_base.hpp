@@ -1,4 +1,4 @@
-// Copyright (C) 2014-2017 Bayerische Motoren Werke Aktiengesellschaft (BMW AG)
+// Copyright (C) 2014-2021 Bayerische Motoren Werke Aktiengesellschaft (BMW AG)
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
@@ -12,16 +12,19 @@
 #include <condition_variable>
 
 #include <vsomeip/constants.hpp>
+#include <vsomeip/vsomeip_sec.h>
 
+#include "types.hpp"
+#include "event.hpp"
+#include "serviceinfo.hpp"
 #include "routing_host.hpp"
+#include "eventgroupinfo.hpp"
 #include "routing_manager.hpp"
 #include "routing_manager_host.hpp"
-#include "types.hpp"
-#include "serviceinfo.hpp"
-#include "event.hpp"
-#include "eventgroupinfo.hpp"
+
 #include "../../message/include/serializer.hpp"
 #include "../../message/include/deserializer.hpp"
+#include "../../protocol/include/protocol.hpp"
 #include "../../configuration/include/configuration.hpp"
 #include "../../endpoints/include/endpoint_manager_base.hpp"
 
@@ -43,10 +46,25 @@ public:
     routing_manager_base(routing_manager_host *_host);
     virtual ~routing_manager_base() = default;
 
-    virtual boost::asio::io_service & get_io();
+    virtual boost::asio::io_context &get_io();
     virtual client_t get_client() const;
+
+    virtual std::string get_client_host() const;
+    virtual void set_client_host(const std::string &_client_host);
     virtual void set_client(const client_t &_client);
-    virtual session_t get_session();
+    virtual session_t get_session(bool _is_request);
+
+    virtual const vsomeip_sec_client_t *get_sec_client() const;
+    virtual void set_sec_client_port(port_t _port);
+
+    virtual std::string get_env(client_t _client) const = 0;
+
+    virtual void debounce_timeout_update_cbk(const boost::system::error_code &_error, const std::shared_ptr<vsomeip_v3::event> &_event, client_t _client, const std::shared_ptr<debounce_filter_impl_t> &_filter);
+    virtual void register_debounce(const std::shared_ptr<debounce_filter_impl_t> &_filter, client_t _client, const std::shared_ptr<vsomeip_v3::event> &_event);
+    virtual void remove_debounce(client_t _client, event_t _event);
+    virtual void update_debounce_clients(const std::set<client_t> &_clients, event_t _event);
+
+    virtual bool is_routing_manager() const;
 
     virtual void init() = 0;
     void init(const std::shared_ptr<endpoint_manager_base>& _endpoint_manager);
@@ -83,11 +101,14 @@ public:
     virtual std::set<std::shared_ptr<event>> find_events(service_t _service,
                 instance_t _instance, eventgroup_t _eventgroup) const;
 
-    virtual void subscribe(client_t _client, uid_t _uid, gid_t _gid,
+    virtual void subscribe(client_t _client,
+            const vsomeip_sec_client_t *_sec_client,
             service_t _service, instance_t _instance,
-            eventgroup_t _eventgroup, major_version_t _major, event_t _event);
+            eventgroup_t _eventgroup, major_version_t _major,
+            event_t _event, const std::shared_ptr<debounce_filter_impl_t> &_filter);
 
-    virtual void unsubscribe(client_t _client, uid_t _uid, gid_t _gid,
+    virtual void unsubscribe(client_t _client,
+            const vsomeip_sec_client_t *_sec_client,
             service_t _service, instance_t _instance,
             eventgroup_t _eventgroup, event_t _event);
 
@@ -102,24 +123,25 @@ public:
 #endif
             );
 
-    virtual bool send(client_t _client, std::shared_ptr<message> _message);
+    virtual bool send(client_t _client, std::shared_ptr<message> _message,
+            bool _force);
 
     virtual bool send(client_t _client, const byte_t *_data, uint32_t _size,
             instance_t _instance, bool _reliable,
-            client_t _bound_client = VSOMEIP_ROUTING_CLIENT,
-            credentials_t _credentials = {ANY_UID, ANY_GID},
-            uint8_t _status_check = 0, bool _sent_from_remote = false) = 0;
+            client_t _bound_client, const vsomeip_sec_client_t *_sec_client,
+            uint8_t _status_check, bool _sent_from_remote,
+            bool _force) = 0;
 
     // routing host -> will be implemented by routing_manager_impl/_proxy/
     virtual void on_message(const byte_t *_data, length_t _length,
-        endpoint *_receiver, const boost::asio::ip::address &_destination
-            = boost::asio::ip::address(), client_t _bound_client = VSOMEIP_ROUTING_CLIENT,
-            credentials_t _credentials = {ANY_UID, ANY_GID},
-            const boost::asio::ip::address &_remote_address = boost::asio::ip::address(),
+            endpoint *_receiver, bool _is_multicast,
+            client_t _bound_client, const vsomeip_sec_client_t *_sec_client,
+            const boost::asio::ip::address &_remote_address,
             std::uint16_t _remote_port = 0) = 0;
 
-
     virtual void set_routing_state(routing_state_e _routing_state) = 0;
+
+    virtual routing_state_e get_routing_state();
 
     virtual void register_client_error_handler(client_t _client,
             const std::shared_ptr<endpoint> &_endpoint) = 0;
@@ -131,9 +153,21 @@ public:
     std::shared_ptr<serviceinfo> find_service(service_t _service, instance_t _instance) const;
 
     client_t find_local_client(service_t _service, instance_t _instance) const;
+    client_t find_local_client_unlocked(service_t _service, instance_t _instance) const;
 
     std::shared_ptr<event> find_event(service_t _service, instance_t _instance,
             event_t _event) const;
+
+    // address data for vsomeip routing via TCP
+    bool get_guest(client_t _client, boost::asio::ip::address &_address,
+            port_t &_port) const;
+    void add_guest(client_t _client, const boost::asio::ip::address &_address,
+            port_t _port);
+    void remove_guest(client_t _client);
+
+    void remove_subscriptions(port_t _local_port,
+            const boost::asio::ip::address &_remote_address,
+            port_t _remote_port);
 
     virtual void on_connect(const std::shared_ptr<endpoint>& _endpoint) = 0;
     virtual void on_disconnect(const std::shared_ptr<endpoint>& _endpoint) = 0;
@@ -147,10 +181,15 @@ protected:
     services_t get_services_remote() const;
     bool is_available(service_t _service, instance_t _instance, major_version_t _major);
 
-    void remove_local(client_t _client, bool _remove_uid);
+    void remove_local(client_t _client, bool _remove_sec_client);
     void remove_local(client_t _client,
-                      const std::set<std::tuple<service_t, instance_t, eventgroup_t>>& _subscribed_eventgroups,
-                      bool _remove_uid);
+            const std::set<
+                std::tuple<service_t, instance_t, eventgroup_t>
+            > &_subscribed_eventgroups,
+            bool _remove_sec_client);
+
+    std::set<std::shared_ptr<eventgroupinfo> > find_eventgroups(service_t _service,
+            instance_t _instance) const;
 
     std::shared_ptr<eventgroupinfo> find_eventgroup(service_t _service,
             instance_t _instance, eventgroup_t _eventgroup) const;
@@ -160,15 +199,16 @@ protected:
 
     bool send_local_notification(client_t _client,
             const byte_t *_data, uint32_t _size, instance_t _instance,
-            bool _reliable = false, uint8_t _status_check = 0);
+            bool _reliable, uint8_t _status_check, bool _force);
 
     bool send_local(
             std::shared_ptr<endpoint> &_target, client_t _client,
             const byte_t *_data, uint32_t _size, instance_t _instance,
-            bool _reliable, uint8_t _command, uint8_t _status_check = 0) const;
+            bool _reliable, protocol::id_e _command, uint8_t _status_check) const;
 
     bool insert_subscription(service_t _service, instance_t _instance,
-            eventgroup_t _eventgroup, event_t _event, client_t _client,
+            eventgroup_t _eventgroup, event_t _event,
+            const std::shared_ptr<debounce_filter_impl_t> &_filter, client_t _client,
             std::set<event_t> *_already_subscribed_events);
 
     std::shared_ptr<serializer> get_serializer();
@@ -179,9 +219,10 @@ protected:
     void send_pending_subscriptions(service_t _service,
             instance_t _instance, major_version_t _major);
 
-    virtual void send_subscribe(client_t _client, service_t _service,
-            instance_t _instance, eventgroup_t _eventgroup,
-            major_version_t _major, event_t _event) = 0;
+    virtual void send_subscribe(client_t _client,
+            service_t _service, instance_t _instance,
+            eventgroup_t _eventgroup, major_version_t _major,
+            event_t _event, const std::shared_ptr<debounce_filter_impl_t> &_filter) = 0;
 
     void remove_pending_subscription(service_t _service, instance_t _instance,
                                      eventgroup_t _eventgroup, event_t _event);
@@ -206,8 +247,12 @@ protected:
 
     bool is_response_allowed(client_t _sender, service_t _service,
             instance_t _instance, method_t _method);
-    bool is_subscribe_to_any_event_allowed(credentials_t _credentials, client_t _client,
+    bool is_subscribe_to_any_event_allowed(
+            const vsomeip_sec_client_t *_sec_client, client_t _client,
             service_t _service, instance_t _instance, eventgroup_t _eventgroup);
+
+    void add_known_client(client_t _client, const std::string &_client_host);
+
 #ifdef VSOMEIP_ENABLE_COMPAT
     void set_incoming_subscription_state(client_t _client, service_t _service, instance_t _instance,
             eventgroup_t _eventgroup, event_t _event, subscription_state_e _state);
@@ -222,12 +267,12 @@ protected:
 private:
     virtual bool create_placeholder_event_and_subscribe(
             service_t _service, instance_t _instance, eventgroup_t _eventgroup,
-            event_t _event, client_t _client) = 0;
+            event_t _event, const std::shared_ptr<debounce_filter_impl_t> &_filter,
+            client_t _client) = 0;
 
 protected:
     routing_manager_host *host_;
-    boost::asio::io_service &io_;
-    std::atomic<client_t> client_;
+    boost::asio::io_context &io_;
 
     std::shared_ptr<configuration> configuration_;
 
@@ -257,6 +302,10 @@ protected:
             std::map<event_t,
                 std::shared_ptr<event> > > > events_;
 
+    boost::asio::steady_timer debounce_timer;
+    std::multimap<std::chrono::steady_clock::time_point, std::tuple<client_t, bool, std::function<void (const boost::system::error_code)>, event_t>> debounce_clients_;
+    mutable std::mutex debounce_mutex_;
+
     std::mutex event_registration_mutex_;
 
 #ifdef USE_DLT
@@ -269,8 +318,8 @@ protected:
         eventgroup_t eventgroup_;
         major_version_t major_;
         event_t event_;
-        uid_t uid_;
-        gid_t gid_;
+        std::shared_ptr<debounce_filter_impl_t> filter_;
+        vsomeip_sec_client_t sec_client_;
 
         bool operator<(const subscription_data_t &_other) const {
             return (service_ < _other.service_
@@ -292,12 +341,25 @@ protected:
 
     std::shared_ptr<endpoint_manager_base> ep_mgr_;
 
-    std::uint32_t own_uid_;
-    std::uint32_t own_gid_;
+    mutable std::mutex known_clients_mutex_;
+    std::map<client_t, std::string> known_clients_;
+
+    mutable std::mutex env_mutex_;
+    std::string env_;
+
+    std::mutex routing_state_mutex_;
+    routing_state_e routing_state_;
 
 private:
     services_t services_;
     mutable std::mutex services_mutex_;
+
+    mutable std::mutex guests_mutex_;
+    std::map<client_t,
+        std::pair<boost::asio::ip::address, port_t>
+    > guests_;
+
+    std::mutex add_known_client_mutex_;
 
 #ifdef VSOMEIP_ENABLE_COMPAT
     std::map<service_t,
