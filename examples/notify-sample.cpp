@@ -1,4 +1,4 @@
-// Copyright (C) 2014-2017 Bayerische Motoren Werke Aktiengesellschaft (BMW AG)
+// Copyright (C) 2014-2023 Bayerische Motoren Werke Aktiengesellschaft (BMW AG)
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
@@ -19,10 +19,9 @@
 
 class service_sample {
 public:
-    service_sample(bool _use_tcp, uint32_t _cycle) :
+    service_sample(uint32_t _cycle) :
             app_(vsomeip::runtime::get()->create_application()),
             is_registered_(false),
-            use_tcp_(_use_tcp),
             cycle_(_cycle),
             blocked_(false),
             running_(true),
@@ -90,8 +89,20 @@ public:
         notify_condition_.notify_one();
         app_->clear_all_handler();
         stop_offer();
-        offer_thread_.join();
-        notify_thread_.join();
+        if (std::this_thread::get_id() != offer_thread_.get_id()) {
+            if (offer_thread_.joinable()) {
+                offer_thread_.join();
+            }
+        } else {
+            offer_thread_.detach();
+        }
+        if (std::this_thread::get_id() != notify_thread_.get_id()) {
+            if (notify_thread_.joinable()) {
+                notify_thread_.join();
+            }
+        } else {
+            notify_thread_.detach();
+        }
         app_->stop();
     }
 #endif
@@ -166,12 +177,6 @@ public:
     }
 
     void notify() {
-        std::shared_ptr<vsomeip::message> its_message
-            = vsomeip::runtime::get()->create_request(use_tcp_);
-
-        its_message->set_service(SAMPLE_SERVICE_ID);
-        its_message->set_instance(SAMPLE_INSTANCE_ID);
-        its_message->set_method(SAMPLE_SET_METHOD_ID);
 
         vsomeip::byte_t its_data[10];
         uint32_t its_size = 1;
@@ -205,7 +210,6 @@ public:
 private:
     std::shared_ptr<vsomeip::application> app_;
     bool is_registered_;
-    bool use_tcp_;
     uint32_t cycle_;
 
     std::mutex mutex_;
@@ -235,23 +239,11 @@ private:
 #endif
 
 int main(int argc, char **argv) {
-    bool use_tcp = false;
     uint32_t cycle = 1000; // default 1s
 
-    std::string tcp_enable("--tcp");
-    std::string udp_enable("--udp");
     std::string cycle_arg("--cycle");
 
     for (int i = 1; i < argc; i++) {
-        if (tcp_enable == argv[i]) {
-            use_tcp = true;
-            break;
-        }
-        if (udp_enable == argv[i]) {
-            use_tcp = false;
-            break;
-        }
-
         if (cycle_arg == argv[i] && i + 1 < argc) {
             i++;
             std::stringstream converter;
@@ -260,7 +252,7 @@ int main(int argc, char **argv) {
         }
     }
 
-    service_sample its_sample(use_tcp, cycle);
+    service_sample its_sample(cycle);
 #ifndef VSOMEIP_ENABLE_SIGNAL_HANDLING
     its_sample_ptr = &its_sample;
     signal(SIGINT, handle_signal);

@@ -1,9 +1,9 @@
-// Copyright (C) 2014-2017 Bayerische Motoren Werke Aktiengesellschaft (BMW AG)
+// Copyright (C) 2014-2021 Bayerische Motoren Werke Aktiengesellschaft (BMW AG)
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-#ifndef _WIN32
+#if defined(__linux__) || defined(ANDROID)
 
 #include <thread>
 
@@ -60,15 +60,14 @@ void netlink_connector::start() {
                 RTMGRP_IPV4_ROUTE | RTMGRP_IPV6_ROUTE |
                 RTMGRP_IPV4_MROUTE | RTMGRP_IPV6_MROUTE), ec);
 
-        if (ec) {
+        if (ec && ec != boost::asio::error::address_in_use) {
             VSOMEIP_WARNING << "Error binding NETLINK socket: " << ec.message();
             if (handler_) {
                 handler_(true, "n/a", true);
                 handler_(false, "n/a", true);
             }
-#ifndef VSOMEIP_ENABLE_MULTIPLE_ROUTING_MANAGERS
+
             return;
-#endif // VSOMEIP_ENABLE_MULTIPLE_ROUTING_MANAGERS
         }
 
         send_ifa_request();
@@ -116,7 +115,7 @@ void netlink_connector::receive_cbk(boost::system::error_code const &_error,
                         auto its_if = net_if_flags_.find(static_cast<int>(ifa->ifa_index));
                         if (its_if != net_if_flags_.end()) {
                             if ((its_if->second & IFF_UP) &&
-                                    (its_if->second & IFF_RUNNING)) {
+                                    (is_requiring_link_ ? (its_if->second & IFF_RUNNING) : true)) {
                                 if (handler_) {
                                     if_indextoname(ifa->ifa_index,ifname);
                                     handler_(true, ifname, true);
@@ -142,7 +141,7 @@ void netlink_connector::receive_cbk(boost::system::error_code const &_error,
                     net_if_flags_[ifi->ifi_index] = ifi->ifi_flags;
                     if (net_if_index_for_address_ == ifi->ifi_index) {
                         if ((ifi->ifi_flags & IFF_UP) &&
-                            (ifi->ifi_flags & IFF_RUNNING)) {
+                            (is_requiring_link_ ? (ifi->ifi_flags & IFF_RUNNING) : true)) {
                             if (handler_) {
                                 if_indextoname(static_cast<unsigned int>(ifi->ifi_index),ifname);
                                 handler_(true, ifname, true);
@@ -441,5 +440,4 @@ bool netlink_connector::check_sd_multicast_route_match(struct rtmsg* _routemsg,
 
 } // namespace vsomeip_v3
 
-#endif // #ifndef _WIN32
-
+#endif // __linux__ or ANDROID

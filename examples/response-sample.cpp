@@ -1,4 +1,4 @@
-// Copyright (C) 2014-2017 Bayerische Motoren Werke Aktiengesellschaft (BMW AG)
+// Copyright (C) 2014-2023 Bayerische Motoren Werke Aktiengesellschaft (BMW AG)
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
@@ -61,7 +61,13 @@ public:
         app_->clear_all_handler();
         stop_offer();
         condition_.notify_one();
-        offer_thread_.join();
+        if (std::this_thread::get_id() != offer_thread_.get_id()) {
+            if (offer_thread_.joinable()) {
+                offer_thread_.join();
+            }
+        } else {
+            offer_thread_.detach();
+        }
         app_->stop();
     }
 #endif
@@ -94,11 +100,11 @@ public:
     }
 
     void on_message(const std::shared_ptr<vsomeip::message> &_request) {
-        std::cout << "Received a message with Client/Session [" << std::setw(4)
-            << std::setfill('0') << std::hex << _request->get_client() << "/"
-            << std::setw(4) << std::setfill('0') << std::hex
-            << _request->get_session() << "]"
-            << std::endl;
+        std::cout << "Received a message with Client/Session ["
+		  << std::setfill('0') << std::hex
+		  << std::setw(4) << _request->get_client() << "/"
+		  << std::setw(4) << _request->get_session() << "]"
+		  << std::endl;
 
         std::shared_ptr<vsomeip::message> its_response
             = vsomeip::runtime::get()->create_response(_request);
@@ -107,7 +113,7 @@ public:
             = vsomeip::runtime::get()->create_payload();
         std::vector<vsomeip::byte_t> its_payload_data;
         for (std::size_t i = 0; i < 120; ++i)
-        its_payload_data.push_back(i % 256);
+            its_payload_data.push_back(vsomeip::byte_t(i % 256));
         its_payload->set_data(its_payload_data);
         its_response->set_payload(its_payload);
 

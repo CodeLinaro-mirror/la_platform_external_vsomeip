@@ -1,4 +1,4 @@
-// Copyright (C) 2015-2017 Bayerische Motoren Werke Aktiengesellschaft (BMW AG)
+// Copyright (C) 2015-2023 Bayerische Motoren Werke Aktiengesellschaft (BMW AG)
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
@@ -16,13 +16,15 @@
 #include <vsomeip/internal/logger.hpp>
 
 #ifdef USE_DLT
+#ifndef ANDROID
 #include <dlt/dlt.h>
-
+#endif
 #endif
 
 static std::shared_ptr<vsomeip::application> its_application;
 
 #ifndef VSOMEIP_ENABLE_SIGNAL_HANDLING
+static vsomeip::routing_state_e routing_state = vsomeip::routing_state_e::RS_RUNNING;
 static bool stop_application = false;
 static bool stop_sighandler = false;
 static std::condition_variable_any sighandler_condition;
@@ -35,9 +37,24 @@ static std::recursive_mutex sighandler_mutex;
  */
 void routingmanagerd_stop(int _signal) {
     // Do not log messages in signal handler as this can cause deadlock in boost logger
-    if (_signal == SIGINT || _signal == SIGTERM) {
+    switch (_signal) {
+    case SIGINT:
+    case SIGTERM:
         stop_application = true;
-    }
+        break;
+
+    case SIGUSR1:
+        routing_state = vsomeip::routing_state_e::RS_SUSPENDED;
+        break;
+
+    case SIGUSR2:
+        routing_state = vsomeip::routing_state_e::RS_RESUMED;
+        break;
+
+    default:
+        ;
+    };
+
     std::unique_lock<std::recursive_mutex> its_lock(sighandler_mutex);
     sighandler_condition.notify_one();
 }
@@ -48,8 +65,10 @@ void routingmanagerd_stop(int _signal) {
  */
 int routingmanagerd_process(bool _is_quiet) {
 #ifdef USE_DLT
+#ifndef ANDROID
     if (!_is_quiet)
         DLT_REGISTER_APP(VSOMEIP_LOG_DEFAULT_APPLICATION_ID, VSOMEIP_LOG_DEFAULT_APPLICATION_NAME);
+#endif
 #else
     (void)_is_quiet;
 #endif
@@ -68,6 +87,8 @@ int routingmanagerd_process(bool _is_quiet) {
         // Unblock signals for this thread only
         sigset_t handler_mask;
         sigemptyset(&handler_mask);
+        sigaddset(&handler_mask, SIGUSR1);
+        sigaddset(&handler_mask, SIGUSR2);
         sigaddset(&handler_mask, SIGTERM);
         sigaddset(&handler_mask, SIGINT);
         sigaddset(&handler_mask, SIGSEGV);
@@ -77,6 +98,8 @@ int routingmanagerd_process(bool _is_quiet) {
         // Handle the following signals
         signal(SIGINT, routingmanagerd_stop);
         signal(SIGTERM, routingmanagerd_stop);
+        signal(SIGUSR1, routingmanagerd_stop);
+        signal(SIGUSR2, routingmanagerd_stop);
 
         while (!stop_sighandler) {
             std::unique_lock<std::recursive_mutex> its_lock(sighandler_mutex);
@@ -84,6 +107,11 @@ int routingmanagerd_process(bool _is_quiet) {
             if (stop_application) {
                 its_application->stop();
                 return;
+            } else if (routing_state == vsomeip::routing_state_e::RS_RESUMED ||
+                    routing_state == vsomeip::routing_state_e::RS_SUSPENDED){
+                VSOMEIP_INFO << "Received signal for setting routing_state to: 0x"
+                       << std::hex << static_cast<int>(routing_state );
+                its_application->set_routing_state(routing_state);
             }
         }
     });
@@ -92,17 +120,31 @@ int routingmanagerd_process(bool _is_quiet) {
         if (its_application->is_routing()) {
             its_application->start();
 #ifndef VSOMEIP_ENABLE_SIGNAL_HANDLING
-            sighandler_thread.join();
+            if (std::this_thread::get_id() != sighandler_thread.get_id()) {
+                if (sighandler_thread.joinable()) {
+                    sighandler_thread.join();
+                }
+            } else {
+                sighandler_thread.detach();
+            }
 #endif
             return 0;
         }
         VSOMEIP_ERROR << "routingmanagerd has not been configured as routing - abort";
     }
 #ifndef VSOMEIP_ENABLE_SIGNAL_HANDLING
-    std::unique_lock<std::recursive_mutex> its_lock(sighandler_mutex);
-    stop_sighandler = true;
-    sighandler_condition.notify_one();
-    sighandler_thread.join();
+    {
+        std::unique_lock<std::recursive_mutex> its_lock(sighandler_mutex);
+        stop_sighandler = true;
+        sighandler_condition.notify_one();
+    }    
+    if (std::this_thread::get_id() != sighandler_thread.get_id()) {
+        if (sighandler_thread.joinable()) {
+            sighandler_thread.join();
+        }
+    } else {
+        sighandler_thread.detach();
+    }
 #endif
     return -1;
 }
