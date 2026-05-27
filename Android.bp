@@ -31,6 +31,7 @@ libvsomeip_sd_srcs = [
 
 cc_defaults {
     name: "vsomeip_defaults",
+    host_supported: true,
 
     cppflags: [
         "-std=c++14",
@@ -52,11 +53,52 @@ cc_defaults {
         "-D_GTHREAD_USE_MUTEX_INIT_FUNC",
         "-D_GTHREAD_USE_RECURSIVE_MUTEX_INIT_FUNC",
         "-DVSOMEIP_ENABLE_MULTIPLE_ROUTING_MANAGERS",
-    ]
+    ],
+    target: {
+      linux_glibc: {
+        cppflags: [
+          // Soong is adding -DANDROID even for the host varaint
+          "-UANDROID",
+        ],
+         generated_headers: [
+         	"vsomeip_gen_internal_hpp",
+         ],
+         export_generated_headers: [
+         	"vsomeip_gen_internal_hpp",
+         ],
+      },
+      android: {
+            cppflags: [
+                "-DVSOMEIP_BASE_PATH=\"/dev/someip/\"",
+            ],
+        },
+    },
+}
+
+genrule {
+    name: "vsomeip_gen_internal_hpp",
+    srcs: ["implementation/configuration/include/internal.hpp.in"],
+    out: ["configuration/include/internal.hpp",],
+    cmd: "sed" +
+        " -e \"s|@DEFAULT_CONFIGURATION_FILE@|/etc/vsomeip.json|g\"" +
+        " -e \"s|@DEFAULT_CONFIGURATION_FOLDER@|/etc/vsomeip|g\"" +
+        " -e \"s|@VSOMEIP_BASE_PATH@|/tmp|g\"" +
+        " -e \"s|@VSOMEIP_MAJOR_VERSION@||g\"" +
+        " -e \"s|@VSOMEIP_DIAGNOSIS_ADDRESS@|0x01|g\"" +
+        " -e \"s|libvsomeip3-cfg\\.so\\.|libvsomeip3-cfg.so|g\"" +
+        " -e \"s|libvsomeip3-sd\\.so\\.|libvsomeip3-sd.so|g\"" +
+        " -e \"s|libvsomeip3-e2e\\.so\\.|libvsomeip3-e2e.so|g\"" +
+        " -e \"s|libvsomeip3-sec\\.so\\.|libvsomeip3-sec.so|g\"" +
+        " -e \"s|@VSOMEIP_UNICAST_ADDRESS@|127.0.0.1|g\"" +
+        " -e \"s|@VSOMEIP_ROUTING_READY_MESSAGE@|SOME/IP routing ready.|g\"" +
+        " -e \"s|@VSOMEIP_LOCAL_TCP_PORT_WAIT_TIME@|1000|g\"" +
+        " -e \"s|@VSOMEIP_LOCAL_TCP_PORT_MAX_WAIT_TIME@|1000|g\"" +
+        " $(in) > $(out) ",
 }
 
 cc_defaults {
     name: "vsomeip_lib_defaults",
+    host_supported: true,
 
     cflags: [
         "-DVSOMEIP_BOOST_VERSION=107100",
@@ -84,8 +126,7 @@ cc_library_shared {
         "-DWITHOUT_SYSTEMD",
         "-DVSOMEIP_VERSION=\"3.4.10\"",
         "-DVSOMEIP_COMPAT_VERSION=\"3.4.10\"",
-        "-DVSOMEIP_BASE_PATH=\"/dev/someip/\"",
-        "-DUSE_DLT",
+//        "-DUSE_DLT",
     ],
 
     ldflags: [
@@ -188,3 +229,24 @@ cc_library_shared {
         "libboost_system"
     ]
 }
+
+//Compitability update - module depend on lib names from older stack version
+
+cc_library_shared {
+    name: "libvsomeip3-cfg",
+    host_supported: true,
+    shared_libs: ["libvsomeip_cfg"],
+}
+
+cc_library_shared {
+    name: "libvsomeip3-e2e",
+    host_supported: true,
+    shared_libs: ["libvsomeip_e2e"],
+}
+
+cc_library_shared {
+    name: "libvsomeip3-sd",
+    host_supported: true,
+    shared_libs: ["libvsomeip_sd"],
+}
+
