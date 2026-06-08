@@ -235,18 +235,48 @@ cc_library_shared {
 cc_library_shared {
     name: "libvsomeip3-cfg",
     host_supported: true,
+
+    vendor: true,
+
+    rtti: true,
+
+    defaults: [
+        "vsomeip_defaults",
+        "vsomeip_lib_defaults"
+    ],
+
     shared_libs: ["libvsomeip_cfg"],
 }
 
 cc_library_shared {
     name: "libvsomeip3-e2e",
     host_supported: true,
+
+    vendor: true,
+
+    rtti: true,
+
+    defaults: [
+        "vsomeip_defaults",
+        "vsomeip_lib_defaults"
+    ],
+
     shared_libs: ["libvsomeip_e2e"],
 }
 
 cc_library_shared {
     name: "libvsomeip3-sd",
     host_supported: true,
+
+    vendor: true,
+
+    rtti: true,
+
+    defaults: [
+        "vsomeip_defaults",
+        "vsomeip_lib_defaults"
+    ],
+
     shared_libs: ["libvsomeip_sd"],
 }
 
